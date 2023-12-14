@@ -3,7 +3,7 @@ import * as vscode from 'vscode';
 export function activate(context: vscode.ExtensionContext) {
     // 注册命令
     context.subscriptions.push(
-        vscode.commands.registerCommand('callgraph.convert2mermaid', () => {
+        vscode.commands.registerCommand('callgraph.convert2mermaid', async () => {
             // 获取当前激活的编辑器
             const editor = vscode.window.activeTextEditor;
             if (!editor) {
@@ -13,57 +13,29 @@ export function activate(context: vscode.ExtensionContext) {
             // 获取当前编辑器中的文本
             const text = editor.document.getText();
 
-            const regex = /```callgraph([\s\S]*?)```/g;
+            let regex = /(\r?\n)(?:```mermaid([\s\S]*?)```(\n{2,})?(\r?\n)?)/g;
+            let newText = text.replace(regex, "");
 
-            // 扫描文本并替换
-            let newText = text.replace(regex, (match, p1, offset) => {
-                const convertedMermaidCode = convertToMermaid(p1.trim());
+            regex = /```callgraph([\s\S]*?)```/g;
 
-                // 判断当前文本段下方是否已经有 Mermaid 语句
-                const textline = editor.document.lineAt(editor.document.positionAt(offset + match.length));
-                if (updateMermaid(textline.lineNumber + 1, editor, convertedMermaidCode) ||
-                    updateMermaid(textline.lineNumber + 2, editor, convertedMermaidCode)) {
-                    return match;
-                }
-
-                // 将 Mermaid 代码块插入到文本段下方
+            newText = newText.replace(regex, (match, p1, offset) => {
+                const convertedMermaidCode = convertToMermaid(p1.trim()).trim();
                 return `${match}\n\n\`\`\`mermaid\n${convertedMermaidCode}\n\`\`\``;
             });
 
-            // 更新文档内容
-            const edit = new vscode.TextEdit(
-                new vscode.Range(0, 0, editor.document.lineCount, 0),
-                newText
-            );
-            editor.edit((editorEdit) => {
-                editorEdit.replace(edit.range, edit.newText);
-            });
-            editor.document.save();
+            // 如果文本有变化，则更新文档内容
+            if (newText !== text) {
+                const edit = new vscode.TextEdit(
+                    new vscode.Range(0, 0, editor.document.lineCount, 0),
+                    newText
+                );
+                await editor.edit((editorEdit) => {
+                    editorEdit.replace(edit.range, edit.newText);
+                });
+                await editor.document.save();
+            }
         })
     );
-}
-
-function updateMermaid(lineNumber: number, editor: vscode.TextEditor, convertedMermaidCode: string): boolean {
-    if (lineNumber < editor.document.lineCount) {
-        const nextLine = editor.document.lineAt(lineNumber);
-        if (nextLine.text.trim().startsWith('```mermaid')) {
-            const mermaidStart = nextLine.range.start;
-            let mermaidEnd = mermaidStart;
-            let mermaidLine = editor.document.lineAt(mermaidEnd);
-            while (!mermaidLine.text.trim().endsWith('```')) {
-                mermaidEnd = mermaidLine.range.end;
-                mermaidLine = editor.document.lineAt(mermaidEnd.translate(1));
-            }
-            mermaidEnd = mermaidLine.range.end;
-            const newSegment = `${nextLine.text.trim()}\n${convertedMermaidCode}\n\`\`\``;
-            const edit = new vscode.TextEdit(new vscode.Range(mermaidStart, mermaidEnd), newSegment);
-            editor.edit((editorEdit) => {
-                editorEdit.replace(edit.range, edit.newText);
-            });
-            return true;
-        }
-    }
-    return false;
 }
 
 function convertToMermaid(text: string): string {
@@ -106,8 +78,7 @@ function convertToMermaid(text: string): string {
             mermaidLines.push(`${parentFunction}-->${functionName}`);
         } else {
             // 如果栈为空，则说明当前行是一个新的子图的起始行
-            if (subgraphCount > 0)
-            {
+            if (subgraphCount > 0) {
                 mermaidLines.push("end");
             }
             subgraphCount++;
